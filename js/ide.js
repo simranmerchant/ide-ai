@@ -1,6 +1,8 @@
-import { usePuter } from "./puter.js";
+import { IS_PUTER } from "./puter.js";
+import { toggleThemeMode } from "./ui.js";
 
 const API_KEY = ""; // Get yours at https://platform.sulu.sh/apis/judge0
+const LLM_API_KEY = "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"; 
 
 const AUTH_HEADERS = API_KEY ? {
     "Authorization": `Bearer ${API_KEY}`
@@ -31,9 +33,10 @@ var fontSize = 13;
 
 var layout;
 
-export var sourceEditor;
+var sourceEditor;
 var stdinEditor;
 var stdoutEditor;
+var assistantEditor;
 
 var $selectLanguage;
 var $compilerOptions;
@@ -55,7 +58,7 @@ var layoutConfig = {
         type: "row",
         content: [{
             type: "component",
-            width: 66,
+            width: 50,
             componentName: "source",
             id: "source",
             title: "Source Code",
@@ -65,42 +68,44 @@ var layoutConfig = {
             }
         }, {
             type: "column",
+            width: 25,
             content: [{
                 type: "component",
-                height: 66,
-                componentName: "ai",
-                id: "ai",
-                title: "AI Coding Assistant",
+                componentName: "stdin",
+                id: "stdin",
+                title: "Input",
                 isClosable: false,
                 componentState: {
                     readOnly: false
                 }
             }, {
-                type: "stack",
-                content: [
-                    {
-                        type: "component",
-                        componentName: "stdin",
-                        id: "stdin",
-                        title: "Input",
-                        isClosable: false,
-                        componentState: {
-                            readOnly: false
-                        }
-                    }, {
-                        type: "component",
-                        componentName: "stdout",
-                        id: "stdout",
-                        title: "Output",
-                        isClosable: false,
-                        componentState: {
-                            readOnly: true
-                        }
-                    }]
+                type: "component",
+                componentName: "stdout",
+                id: "stdout",
+                title: "Output",
+                isClosable: false,
+                componentState: {
+                    readOnly: true
+                }
+            }]
+        }, {
+            type: "column",
+            width: 25,
+            content: [{
+                type: "component",
+                componentName: "assistant",
+                id: "assistant",
+                title: "AI Assistant",
+                isClosable: false,
+                componentState: {
+                    readOnly: false,
+                    wordwrap: true
+                }
             }]
         }]
     }]
 };
+
 
 var gPuterFile;
 
@@ -139,7 +144,7 @@ function showHttpError(jqXHR) {
 
 function handleRunError(jqXHR) {
     showHttpError(jqXHR);
-    $runBtn.removeClass("loading");
+    $runBtn.removeClass("disabled");
 
     window.top.postMessage(JSON.parse(JSON.stringify({
         event: "runError",
@@ -163,7 +168,7 @@ function handleResult(data) {
 
     stdoutEditor.setValue(output);
 
-    $runBtn.removeClass("loading");
+    $runBtn.removeClass("disabled");
 
     window.top.postMessage(JSON.parse(JSON.stringify({
         event: "postExecution",
@@ -191,7 +196,7 @@ function run() {
         showError("Error", "Source code can't be empty!");
         return;
     } else {
-        $runBtn.addClass("loading");
+        $runBtn.addClass("disabled");
     }
 
     stdoutEditor.setValue("");
@@ -270,6 +275,10 @@ function run() {
     }
 }
 
+function chat() {
+    assistantEditor.setValue("");
+}
+
 function fetchSubmission(flavor, region, submission_token, iteration) {
     if (iteration >= MAX_PROBE_REQUESTS) {
         handleRunError({
@@ -323,7 +332,7 @@ function saveFile(content, filename) {
 }
 
 async function openAction() {
-    if (usePuter()) {
+    if (IS_PUTER) {
         gPuterFile = await puter.ui.showOpenFilePicker();
         openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
     } else {
@@ -332,7 +341,7 @@ async function openAction() {
 }
 
 async function saveAction() {
-    if (usePuter()) {
+    if (IS_PUTER) {
         if (gPuterFile) {
             gPuterFile.write(sourceEditor.getValue());
         } else {
@@ -348,6 +357,7 @@ function setFontSizeForAllEditors(fontSize) {
     sourceEditor.updateOptions({ fontSize: fontSize });
     stdinEditor.updateOptions({ fontSize: fontSize });
     stdoutEditor.updateOptions({ fontSize: fontSize });
+    assistantEditor.updateOptions({ fontSize: fontSize });
 }
 
 async function loadLangauges() {
@@ -477,7 +487,7 @@ function refreshLayoutSize() {
 
 window.addEventListener("resize", refreshLayoutSize);
 document.addEventListener("DOMContentLoaded", async function () {
-    $(".ui.selection.dropdown").dropdown();
+    $("#select-language").dropdown();
     $("[data-content]").popup({
         lastResort: "left center"
     });
@@ -521,37 +531,33 @@ document.addEventListener("DOMContentLoaded", async function () {
     $(document).on("keydown", "body", function (e) {
         if (e.metaKey || e.ctrlKey) {
             switch (e.key) {
-                case "Enter":
+                case "Enter": // Ctrl+Enter, Cmd+Enter
                     e.preventDefault();
                     run();
                     break;
-                case "s":
+                case "s": // Ctrl+S, Cmd+S
                     e.preventDefault();
-                    saveAction();
+                    save();
                     break;
-                case "o":
+                case "o": // Ctrl+O, Cmd+O
                     e.preventDefault();
-                    openAction();
+                    open();
                     break;
-                case "+":
-                case "=":
+                case "+": // Ctrl+Plus
+                case "=": // Some layouts use '=' for '+'
                     e.preventDefault();
                     fontSize += 1;
                     setFontSizeForAllEditors(fontSize);
                     break;
-                case "-":
+                case "-": // Ctrl+Minus
                     e.preventDefault();
                     fontSize -= 1;
                     setFontSizeForAllEditors(fontSize);
                     break;
-                case "0":
+                case "0": // Ctrl+0
                     e.preventDefault();
                     fontSize = 13;
                     setFontSizeForAllEditors(fontSize);
-                    break;
-                case "`":
-                    e.preventDefault();
-                    sourceEditor.focus();
                     break;
             }
         }
@@ -601,8 +607,20 @@ document.addEventListener("DOMContentLoaded", async function () {
             });
         });
 
-        layout.registerComponent("ai", function (container, state) {
-            container.getElement()[0].appendChild(document.getElementById("judge0-chat-container"));
+        layout.registerComponent("assistant", function(container, state) {
+            assistantEditor = monaco.editor.create(container.getElement()[0], {
+                automaticLayout: true,
+                scrollBeyondLastLine: false,
+                readOnly: state.readOnly,
+                language: "plain text",
+                fontFamily: "JetBrains Mono",
+                wordWrap: "on",
+                minimap: {
+                    enabled: false
+                },
+                renderLineHighlight: "none",
+                lineNumbers: "off"
+            });
         });
 
         layout.on("initialised", function () {
@@ -627,13 +645,14 @@ document.addEventListener("DOMContentLoaded", async function () {
         e.innerText = `${superKey}${e.innerText}`;
     });
 
-    if (usePuter()) {
+    if (IS_PUTER) {
         puter.ui.onLaunchedWithItems(async function (items) {
             gPuterFile = items[0];
             openFile(await (await gPuterFile.read()).text(), gPuterFile.name);
         });
     }
 
+    document.getElementById("judge0-theme-toggle-btn").addEventListener("click", toggleThemeMode);
     document.getElementById("judge0-open-file-btn").addEventListener("click", openAction);
     document.getElementById("judge0-save-btn").addEventListener("click", saveAction);
 
@@ -650,6 +669,7 @@ document.addEventListener("DOMContentLoaded", async function () {
                 flavor: getSelectedLanguageFlavor(),
                 stdin: stdinEditor.getValue(),
                 stdout: stdoutEditor.getValue(),
+                assistant: assistantEditor.getValue(),
                 compiler_options: $compilerOptions.val(),
                 command_line_arguments: $commandLineArguments.val()
             })), "*");
